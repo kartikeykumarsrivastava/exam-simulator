@@ -1,0 +1,58 @@
+services:
+  localstack:
+    image: ${LOCALSTACK_IMAGE:-localstack/localstack:2026.8.4}
+    ports: ["4566:4566"]
+    environment:
+      AWS_DEFAULT_REGION: us-east-1
+      LAMBDA_DOCKER_NETWORK: exam-network
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./.localstack:/var/lib/localstack
+    networks: [exam]
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes: ["ollama:/root/.ollama"]
+    networks: [exam]
+  ocr:
+    build: ./ocr
+    ports: ["127.0.0.1:8001:8001"]
+    environment:
+      OCR_LANGUAGES: ${OCR_LANGUAGES:-eng}
+      OMP_THREAD_LIMIT: "2"
+    mem_limit: 1g
+    cpus: 2
+    networks: [exam]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health',timeout=5)"]
+      interval: 15s
+      timeout: 6s
+      retries: 3
+  api:
+    build: ./backend
+    ports: ["8000:8000"]
+    environment:
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:7b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text}
+      EMAIL_STATE_MACHINE_ARN: arn:aws:states:us-east-1:000000000000:stateMachine:SendEmailStateMachine
+      DATA_DIR: /data
+      OCR_BASE_URL: http://ocr:8001
+    volumes: ["./data:/data"]
+    networks: [exam]
+    depends_on: [localstack, ollama, ocr]
+  web:
+    build: ./frontend
+    ports: ["3000:80"]
+    depends_on: [api]
+    networks: [exam]
+networks:
+  exam:
+    name: exam-network
+volumes:
+  ollama:
